@@ -1,59 +1,49 @@
-/*
-  ==============================================================================
-
-    This file contains the basic framework code for a JUCE plugin processor.
-
-  ==============================================================================
-*/
-
 #pragma once
 
 #include <JuceHeader.h>
 
-//==============================================================================
-/**
-*/
-class ChorusCE2AudioProcessor  : public juce::AudioProcessor
+class ChorusCE2AudioProcessor : public juce::AudioProcessor
 {
 public:
-    //==============================================================================
     ChorusCE2AudioProcessor();
-    ~ChorusCE2AudioProcessor() override;
+    ~ChorusCE2AudioProcessor() override = default;
 
-    //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
-    void releaseResources() override;
-
-   #ifndef JucePlugin_PreferredChannelConfigurations
-    bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
-   #endif
+    void releaseResources() override {}
 
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
-    //==============================================================================
     juce::AudioProcessorEditor* createEditor() override;
-    bool hasEditor() const override;
+    bool hasEditor() const override { return true; }
 
-    //==============================================================================
-    const juce::String getName() const override;
+    const juce::String getName() const override { return "ChorusCE2"; }
 
-    bool acceptsMidi() const override;
-    bool producesMidi() const override;
-    bool isMidiEffect() const override;
-    double getTailLengthSeconds() const override;
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
 
-    //==============================================================================
-    int getNumPrograms() override;
-    int getCurrentProgram() override;
-    void setCurrentProgram (int index) override;
-    const juce::String getProgramName (int index) override;
-    void changeProgramName (int index, const juce::String& newName) override;
+    double getTailLengthSeconds() const override { return 0.05; }
 
-    //==============================================================================
-    void getStateInformation (juce::MemoryBlock& destData) override;
-    void setStateInformation (const void* data, int sizeInBytes) override;
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+
+    // Parameters
+    juce::AudioProcessorValueTreeState apvts;
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParams();
 
 private:
-    //==============================================================================
+    // DSP state
+    juce::AudioBuffer<float> delayBuffer;
+    int writePos = 0;
+
+    float lfoPhase = 0.0f;
+    double sr = 44100.0;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChorusCE2AudioProcessor)
 };

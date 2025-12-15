@@ -1,190 +1,88 @@
-/*
-  ==============================================================================
-
-    This file contains the basic framework code for a JUCE plugin processor.
-
-  ==============================================================================
-*/
-
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
 //==============================================================================
 ChorusCE2AudioProcessor::ChorusCE2AudioProcessor()
-#ifndef JucePlugin_PreferredChannelConfigurations
-     : AudioProcessor (BusesProperties()
-                     #if ! JucePlugin_IsMidiEffect
-                      #if ! JucePlugin_IsSynth
-                       .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                      #endif
-                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-                     #endif
-                       )
-#endif
-{
-}
-
-ChorusCE2AudioProcessor::~ChorusCE2AudioProcessor()
+: AudioProcessor (BusesProperties()
+                  .withInput  ("Input",  juce::AudioChannelSet::mono(), true)
+                  .withOutput ("Output", juce::AudioChannelSet::mono(), true)),
+  apvts (*this, nullptr, "PARAMS", createParams())
 {
 }
 
 //==============================================================================
-const juce::String ChorusCE2AudioProcessor::getName() const
+juce::AudioProcessorValueTreeState::ParameterLayout
+ChorusCE2AudioProcessor::createParams()
 {
-    return JucePlugin_Name;
-}
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
-bool ChorusCE2AudioProcessor::acceptsMidi() const
-{
-   #if JucePlugin_WantsMidiInput
-    return true;
-   #else
-    return false;
-   #endif
-}
+    params.push_back (std::make_unique<juce::AudioParameterFloat>(
+        "rate", "Rate", 0.1f, 5.0f, 1.0f));
 
-bool ChorusCE2AudioProcessor::producesMidi() const
-{
-   #if JucePlugin_ProducesMidiOutput
-    return true;
-   #else
-    return false;
-   #endif
-}
+    params.push_back (std::make_unique<juce::AudioParameterFloat>(
+        "depth", "Depth", 0.0f, 1.0f, 0.5f));
 
-bool ChorusCE2AudioProcessor::isMidiEffect() const
-{
-   #if JucePlugin_IsMidiEffect
-    return true;
-   #else
-    return false;
-   #endif
-}
-
-double ChorusCE2AudioProcessor::getTailLengthSeconds() const
-{
-    return 0.0;
-}
-
-int ChorusCE2AudioProcessor::getNumPrograms()
-{
-    return 1;   // NB: some hosts don't cope very well if you tell them there are 0 programs,
-                // so this should be at least 1, even if you're not really implementing programs.
-}
-
-int ChorusCE2AudioProcessor::getCurrentProgram()
-{
-    return 0;
-}
-
-void ChorusCE2AudioProcessor::setCurrentProgram (int index)
-{
-}
-
-const juce::String ChorusCE2AudioProcessor::getProgramName (int index)
-{
-    return {};
-}
-
-void ChorusCE2AudioProcessor::changeProgramName (int index, const juce::String& newName)
-{
+    return { params.begin(), params.end() };
 }
 
 //==============================================================================
 void ChorusCE2AudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
+    sr = sampleRate;
+
+    int maxDelaySamples = (int) (0.03 * sr); // 30 ms max
+    delayBuffer.setSize (1, maxDelaySamples + samplesPerBlock);
+    delayBuffer.clear();
+
+    writePos = 0;
+    lfoPhase = 0.0f;
 }
 
-void ChorusCE2AudioProcessor::releaseResources()
+//==============================================================================
+void ChorusCE2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+                                            juce::MidiBuffer&)
 {
-    // When playback stops, you can use this as an opportunity to free up any
-    // spare memory, etc.
-}
+    auto* rate  = apvts.getRawParameterValue ("rate");
+    auto* depth = apvts.getRawParameterValue ("depth");
 
-#ifndef JucePlugin_PreferredChannelConfigurations
-bool ChorusCE2AudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
-{
-  #if JucePlugin_IsMidiEffect
-    juce::ignoreUnused (layouts);
-    return true;
-  #else
-    // This is the place where you check if the layout is supported.
-    // In this template code we only support mono or stereo.
-    // Some plugin hosts, such as certain GarageBand versions, will only
-    // load plugins that support stereo bus layouts.
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
-     && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
-        return false;
+    float* channelData = buffer.getWritePointer (0);
+    float* delayData   = delayBuffer.getWritePointer (0);
 
-    // This checks if the input layout matches the output layout
-   #if ! JucePlugin_IsSynth
-    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
-        return false;
-   #endif
+    int bufferSize = delayBuffer.getNumSamples();
+    int numSamples = buffer.getNumSamples();
 
-    return true;
-  #endif
-}
-#endif
-
-void ChorusCE2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
-{
-    juce::ScopedNoDenormals noDenormals;
-    auto totalNumInputChannels  = getTotalNumInputChannels();
-    auto totalNumOutputChannels = getTotalNumOutputChannels();
-
-    // In case we have more outputs than inputs, this code clears any output
-    // channels that didn't contain input data, (because these aren't
-    // guaranteed to be empty - they may contain garbage).
-    // This is here to avoid people getting screaming feedback
-    // when they first compile a plugin, but obviously you don't need to keep
-    // this code if your algorithm always overwrites all the output channels.
-    for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
-        buffer.clear (i, 0, buffer.getNumSamples());
-
-    // This is the place where you'd normally do the guts of your plugin's
-    // audio processing...
-    // Make sure to reset the state if your inner loop is processing
-    // the samples and the outer loop is handling the channels.
-    // Alternatively, you can process the samples with the channels
-    // interleaved by keeping the same state.
-    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    for (int i = 0; i < numSamples; ++i)
     {
-        auto* channelData = buffer.getWritePointer (channel);
+        // LFO
+        float lfo = std::sin (lfoPhase);
+        lfoPhase += juce::MathConstants<float>::twoPi * (*rate) / (float) sr;
+        if (lfoPhase > juce::MathConstants<float>::twoPi)
+            lfoPhase -= juce::MathConstants<float>::twoPi;
 
-        // ..do something to the data...
+        // Delay modulation
+        float delaySamples = (10.0f + lfo * (*depth) * 10.0f) * sr / 1000.0f;
+
+        int readPos = (int) (writePos - delaySamples + bufferSize) % bufferSize;
+
+        float dry = channelData[i];
+        float wet = delayData[readPos];
+
+        delayData[writePos] = dry;
+
+        // Fixed mix (classic pedal style)
+        channelData[i] = 0.7f * dry + 0.3f * wet;
+
+        writePos = (writePos + 1) % bufferSize;
     }
 }
 
 //==============================================================================
-bool ChorusCE2AudioProcessor::hasEditor() const
-{
-    return true; // (change this to false if you choose to not supply an editor)
-}
-
 juce::AudioProcessorEditor* ChorusCE2AudioProcessor::createEditor()
 {
     return new ChorusCE2AudioProcessorEditor (*this);
 }
 
 //==============================================================================
-void ChorusCE2AudioProcessor::getStateInformation (juce::MemoryBlock& destData)
-{
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
-}
-
-void ChorusCE2AudioProcessor::setStateInformation (const void* data, int sizeInBytes)
-{
-    // You should use this method to restore your parameters from this memory block,
-    // whose contents will have been created by the getStateInformation() call.
-}
-
-//==============================================================================
-// This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new ChorusCE2AudioProcessor();

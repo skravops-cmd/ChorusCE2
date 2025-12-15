@@ -1,40 +1,38 @@
-/*
-  ==============================================================================
-
-    This file contains the basic framework code for a JUCE plugin editor.
-
-  ==============================================================================
-*/
-
-#include "PluginProcessor.h"
 #include "PluginEditor.h"
 
 //==============================================================================
-ChorusCE2AudioProcessorEditor::ChorusCE2AudioProcessorEditor (ChorusCE2AudioProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p)
+ChorusCE2AudioProcessorEditor::ChorusCE2AudioProcessorEditor
+    (ChorusCE2AudioProcessor& p)
+    : AudioProcessorEditor (&p), processor (p)
 {
-    // Make sure that before the constructor has finished, you've set the
-    // editor's size to whatever you need it to be.
-    setSize (400, 300);
-}
+    auto setup = [this] (juce::Slider& s)
+    {
+        s.setSliderStyle (juce::Slider::Rotary);
+        s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        addAndMakeVisible (s);
+    };
 
-ChorusCE2AudioProcessorEditor::~ChorusCE2AudioProcessorEditor()
-{
+    setup (rateSlider);
+    setup (depthSlider);
+
+    rateAttach  = std::make_unique<Attachment> (processor.apvts, "rate", rateSlider);
+    depthAttach = std::make_unique<Attachment> (processor.apvts, "depth", depthSlider);
+
+    setSize (200, 300);
 }
 
 //==============================================================================
 void ChorusCE2AudioProcessorEditor::paint (juce::Graphics& g)
 {
-    // (Our component is opaque, so we must completely fill the background with a solid colour)
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
-
-    g.setColour (juce::Colours::white);
-    g.setFont (juce::FontOptions (15.0f));
-    g.drawFittedText ("Hello World!", getLocalBounds(), juce::Justification::centred, 1);
+    g.fillAll (juce::Colour (0xff3fa9c5)); // CE-2 blue
+    g.setColour (juce::Colours::black);
+    g.setFont (18.0f);
+    g.drawText ("CHORUS CE-2", getLocalBounds().removeFromTop (40),
+                juce::Justification::centred);
 }
 
 void ChorusCE2AudioProcessorEditor::resized()
 {
-    // This is generally where you'll want to lay out the positions of any
-    // subcomponents in your editor..
+    rateSlider .setBounds (30, 60, 60, 60);
+    depthSlider.setBounds (110, 60, 60, 60);
 }
